@@ -1,0 +1,60 @@
+name: 🎫 周杰伦演唱会抢票监控
+
+on:
+  schedule:
+    # 每2分钟运行一次（UTC时间，北京时间+8）
+    # 在北京时间早8点到晚11点之间高频运行
+    - cron: '*/2 0-15 * * *'     # 北京时间 08:00 - 23:59
+    - cron: '0,30 16-23 * * *'   # 北京时间 00:00 - 07:59（每30分钟，夜间低频）
+  
+  # 也支持手动触发
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: '测试模式（发送测试通知）'
+        required: false
+        default: 'false'
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 运行监控脚本
+        env:
+          SERVER_CHAN_KEY: ${{ secrets.SERVER_CHAN_KEY }}
+        run: node cloud-monitor.js
+
+      - name: 测试通知（仅手动触发）
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_mode == 'true' }}
+        env:
+          SERVER_CHAN_KEY: ${{ secrets.SERVER_CHAN_KEY }}
+        run: |
+          node -e "
+          const https = require('https');
+          const key = process.env.SERVER_CHAN_KEY;
+          if (!key) { console.log('未配置SERVER_CHAN_KEY'); process.exit(1); }
+          const data = JSON.stringify({
+            title: '🧪 测试通知',
+            desp: '周杰伦抢票监控系统已就绪！\n\n这是一条测试消息，说明配置正确。\n\n当检测到开售时，您会收到类似的即时通知。'
+          });
+          const req = https.request('https://sctapi.ftqq.com/' + key + '.send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Content-Length': data.length }
+          }, res => {
+            let d = '';
+            res.on('data', c => d += c);
+            res.on('end', () => console.log('通知结果:', d));
+          });
+          req.write(data);
+          req.end();
+          "
